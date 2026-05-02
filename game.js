@@ -35,6 +35,7 @@ class GameScene extends Phaser.Scene {
 
   preload() {
     this.load.image("bg", "bg.jpg");
+    this.load.image("bg2", "bg2.jpg");
     this.load.image("dragon1", "dragon1-f.png");
     this.load.image("dragon2", "dragon2-f.png");
     this.load.image("dragon1b", "dragon1b-f.png");
@@ -46,7 +47,8 @@ class GameScene extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
 
-    this.bg = this.add.image(width / 2, height / 2, "bg");
+    const bgKey = Math.random() < 0.5 ? "bg" : "bg2";
+    this.bg = this.add.image(width / 2, height / 2, bgKey);
     this.bg.setDisplaySize(width, height);
     this.bg.setAlpha(0.25);
 
