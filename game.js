@@ -9,6 +9,11 @@ const SPRITE_LIFT = 1.65;
 const BODY_SCALE = 2.0; // multiplier on collision body size (larger = earlier collisions)
 const PORTAL_HEIGHT_FRACTION = 0.15;
 const TELEPORT_COOLDOWN_MS = 500;
+const ENEMY_SPEED = 150;
+const ENEMY_HEIGHT_FRACTION = 0.1;
+const PLAYER_RESPAWN_MS = 3000;
+const FLAP_INTERVAL_MS = 150;
+const P1_FLAP_SHIFT_X = 100; // pixels to shift dragon1b image (right when facing right)
 
 // Natural image dimensions — used to preserve aspect ratio
 const P1_NATURAL = { w: 462, h: 728 };
@@ -32,8 +37,10 @@ class GameScene extends Phaser.Scene {
     this.load.image("bg", "bg.jpg");
     this.load.image("dragon1", "dragon1-f.png");
     this.load.image("dragon2", "dragon2-f.png");
+    this.load.image("dragon1b", "dragon1b-f.png");
     this.load.image("enter-portal", "enter-portal.png");
     this.load.image("exit-portal", "exit-portal.png");
+    this.load.image("enemy1", "enemy1.png");
   }
 
   create() {
@@ -73,10 +80,20 @@ class GameScene extends Phaser.Scene {
     this.p2.setCollideWorldBounds(true);
     this.p2.body.setGravityY(GRAVITY);
 
+    const d1bSrc = this.textures.get("dragon1b").getSourceImage();
+    this.D1B_NATURAL = { w: d1bSrc.width, h: d1bSrc.height };
+    this.p1.baseOffsetX = this.p1.body.offset.x;
+
     this.p1.flyTime = 0;
     this.p2.flyTime = 0;
+    this.p1.flapTimer = 0;
+    this.p1.flapFrame = 0;
     this.p1.teleportCooldown = false;
     this.p2.teleportCooldown = false;
+    this.p1.invincible = false;
+    this.p2.invincible = false;
+    this.p1StartX = width * 0.35;
+    this.p2StartX = width * 0.65;
 
     this.p1.body.setBounce(0.5);
     this.p2.body.setBounce(0.5);
@@ -107,6 +124,9 @@ class GameScene extends Phaser.Scene {
       this.teleport(this.p2),
     );
 
+    // Enemy
+    this.spawnEnemy();
+
     this.cursors = this.input.keyboard.createCursorKeys();
     this.wasd = this.input.keyboard.addKeys({
       up: Phaser.Input.Keyboard.KeyCodes.W,
@@ -116,6 +136,77 @@ class GameScene extends Phaser.Scene {
     });
 
     this.scale.on("resize", this.onResize, this);
+  }
+
+  spawnEnemy() {
+    const { width, height } = this.scale;
+    const tex = this.textures.get("enemy1").getSourceImage();
+    const aspect = tex.width / tex.height;
+    const enemyH = height * ENEMY_HEIGHT_FRACTION;
+    const enemyW = enemyH * aspect;
+    const groundTop = height * (1 - GROUND_FRACTION);
+    const startX = Phaser.Math.Between(width * 0.2, width * 0.8);
+
+    this.enemy = this.physics.add.image(
+      startX,
+      groundTop - enemyH / 2,
+      "enemy1",
+    );
+    this.enemy.setDisplaySize(enemyW, enemyH);
+    this.enemy.body.setSize(enemyW, enemyH);
+    this.enemy.setCollideWorldBounds(true);
+    this.enemy.body.setGravityY(GRAVITY);
+    this.enemy.body.setVelocityX(ENEMY_SPEED);
+    this.enemy.direction = 1;
+    this.enemy.dying = false;
+
+    this.physics.add.collider(this.enemy, this.ground);
+    this.physics.add.collider(this.p1, this.enemy, (p, e) =>
+      this.handlePlayerEnemy(p, e),
+    );
+    this.physics.add.collider(this.p2, this.enemy, (p, e) =>
+      this.handlePlayerEnemy(p, e),
+    );
+  }
+
+  handlePlayerEnemy(player, enemy) {
+    if (player.invincible || enemy.dying) return;
+
+    const stomp = player.body.velocity.y > 0 && player.y < enemy.y;
+
+    if (stomp) {
+      enemy.dying = true;
+      player.body.setVelocityY(JUMP_VEL * 0.5);
+      this.tweens.add({
+        targets: enemy,
+        alpha: 0,
+        duration: 80,
+        yoyo: true,
+        repeat: 3,
+        onComplete: () => {
+          enemy.destroy();
+          this.enemy = null;
+          this.time.delayedCall(3000, () => this.spawnEnemy());
+        },
+      });
+    } else {
+      player.invincible = true;
+      this.tweens.add({
+        targets: player,
+        alpha: 0,
+        duration: 120,
+        yoyo: true,
+        repeat: -1,
+      });
+      this.time.delayedCall(PLAYER_RESPAWN_MS, () => {
+        this.tweens.killTweensOf(player);
+        player.setAlpha(1);
+        player.invincible = false;
+        const sx = player === this.p1 ? this.p1StartX : this.p2StartX;
+        player.setPosition(sx, this.scale.height * 0.3);
+        player.body.reset(sx, this.scale.height * 0.3);
+      });
+    }
   }
 
   spawnPortals() {
@@ -187,6 +278,9 @@ class GameScene extends Phaser.Scene {
     this.ground.body.reset(width / 2, height - groundH / 2);
     this.ground.body.setSize(width, groundH);
 
+    this.p1StartX = width * 0.35;
+    this.p2StartX = width * 0.65;
+
     const s1 = spriteDisplaySize(P1_NATURAL, height);
     this.p1.setDisplaySize(s1.w, s1.h);
     this.p1.body.setSize(s1.w * BODY_SCALE, s1.h * BODY_SCALE);
@@ -200,7 +294,32 @@ class GameScene extends Phaser.Scene {
     this.p2.body.setSize(s2.w, s2.h);
     this.p2.body.setOffset(0, s2.h * SPRITE_LIFT);
 
+    if (this.enemy && this.enemy.active) {
+      const tex = this.textures.get("enemy1").getSourceImage();
+      const enemyH = height * ENEMY_HEIGHT_FRACTION;
+      const enemyW = enemyH * (tex.width / tex.height);
+      this.enemy.setDisplaySize(enemyW, enemyH);
+      this.enemy.body.setSize(enemyW, enemyH);
+    }
+
     this.spawnPortals();
+  }
+
+  updateP1Texture() {
+    const h = this.scale.height * SPRITE_HEIGHT_FRACTION;
+    if (this.p1.flapFrame === 0) {
+      this.p1.setTexture("dragon1");
+      this.p1.setDisplaySize(h * (P1_NATURAL.w / P1_NATURAL.h), h);
+      this.p1.body.setOffset(this.p1.baseOffsetX, this.p1.body.offset.y);
+    } else {
+      this.p1.setTexture("dragon1b");
+      this.p1.setDisplaySize(h * (this.D1B_NATURAL.w / this.D1B_NATURAL.h), h);
+      const dir = this.p1.flipX ? -1 : 1;
+      this.p1.body.setOffset(
+        this.p1.baseOffsetX + P1_FLAP_SHIFT_X * dir,
+        this.p1.body.offset.y,
+      );
+    }
   }
 
   update() {
@@ -221,6 +340,35 @@ class GameScene extends Phaser.Scene {
       this.wasd.up.isDown,
       dt,
     );
+
+    // P1 flap animation while flying
+    const p1Flying =
+      this.cursors.up.isDown &&
+      !this.p1.body.blocked.down &&
+      this.p1.flyTime > 0;
+    if (p1Flying) {
+      this.p1.flapTimer += this.game.loop.delta;
+      if (this.p1.flapTimer >= FLAP_INTERVAL_MS) {
+        this.p1.flapTimer = 0;
+        this.p1.flapFrame = 1 - this.p1.flapFrame;
+        this.updateP1Texture();
+      }
+    } else if (this.p1.flapFrame !== 0) {
+      this.p1.flapFrame = 0;
+      this.p1.flapTimer = 0;
+      this.updateP1Texture();
+    }
+
+    if (this.enemy && this.enemy.active && !this.enemy.dying) {
+      if (this.enemy.body.blocked.left) {
+        this.enemy.direction = 1;
+        this.enemy.setFlipX(false);
+      } else if (this.enemy.body.blocked.right) {
+        this.enemy.direction = -1;
+        this.enemy.setFlipX(true);
+      }
+      this.enemy.body.setVelocityX(ENEMY_SPEED * this.enemy.direction);
+    }
   }
 
   movePlayer(sprite, left, right, jumpJustDown, upHeld, dt) {
