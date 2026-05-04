@@ -42,6 +42,10 @@ class GameScene extends Phaser.Scene {
     this.load.image("enter-portal", "enter-portal.png");
     this.load.image("exit-portal", "exit-portal.png");
     this.load.image("enemy1", "enemy1.png");
+    this.load.audio("dragon1-flying", "dragon-1-flying.mp3");
+    this.load.audio("dragon2-flying", "dragon-2-flying.mp3");
+    this.load.audio("portal", "portal.mp3");
+    this.load.audio("damage", "damage.mp3");
   }
 
   create() {
@@ -137,6 +141,11 @@ class GameScene extends Phaser.Scene {
       right: Phaser.Input.Keyboard.KeyCodes.D,
     });
 
+    this.p1FlyingSound = this.sound.add("dragon1-flying", { loop: true });
+    this.p2FlyingSound = this.sound.add("dragon2-flying", { loop: true });
+    this.portalSound = this.sound.add("portal");
+    this.damageSound = this.sound.add("damage");
+
     this.scale.on("resize", this.onResize, this);
   }
 
@@ -193,6 +202,7 @@ class GameScene extends Phaser.Scene {
       });
     } else {
       player.invincible = true;
+      this.damageSound.play();
       this.tweens.add({
         targets: player,
         alpha: 0,
@@ -248,6 +258,7 @@ class GameScene extends Phaser.Scene {
     player.teleportCooldown = true;
     this.portalsActive = false;
 
+    this.portalSound.play();
     player.setPosition(this.exitPortal.x, this.exitPortal.y);
     player.body.reset(this.exitPortal.x, this.exitPortal.y);
 
@@ -342,6 +353,14 @@ class GameScene extends Phaser.Scene {
       this.wasd.up.isDown,
       dt,
     );
+
+    // Flying sounds
+    const p1Airborne = !this.p1.body.blocked.down;
+    const p2Airborne = !this.p2.body.blocked.down;
+    if (p1Airborne && !this.p1FlyingSound.isPlaying) this.p1FlyingSound.play();
+    else if (!p1Airborne && this.p1FlyingSound.isPlaying) this.p1FlyingSound.stop();
+    if (p2Airborne && !this.p2FlyingSound.isPlaying) this.p2FlyingSound.play();
+    else if (!p2Airborne && this.p2FlyingSound.isPlaying) this.p2FlyingSound.stop();
 
     // P1 flap animation while flying
     const p1Flying =
